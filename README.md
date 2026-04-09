@@ -1,2 +1,2 @@
-# Coding-2-Final-Project
+# Coding 2 Final Project
 Platformer game in javascript
