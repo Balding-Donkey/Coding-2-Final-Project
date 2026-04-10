@@ -1,10 +1,22 @@
 <!DOCTYPE html>
 <head>
     <title>Coding 2 Final Project</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+        }
+    </style>
 </head>
 <body style="margin:0; padding:0; background-color:#45d1ff;">
-    <div style="display:flex; height:100vh; align-items:center; justify-content:center;">
+    <!-- this div centers the canvas vertically and horizontally -->
+    <div style="display:flex; height:100vh; min-height: 631px; align-items:center; justify-content:center;">
         <canvas id="canvas" width="1120" height="630" style="border: 1px solid #000000; display: block;"></canvas>
-        <script src="main.js"></script>
     </div>
+
+    <!-- custom log because the school disabled developer console -->
+    <div>
+        <p>Output:</p>
+        <p id="textLog"></p>
+    </div>
+    <script src="main.js"></script>
 </body>
