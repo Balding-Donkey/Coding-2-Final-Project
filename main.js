@@ -22,6 +22,7 @@ logButton.addEventListener("click", () => {
 let keyDown = {};
 let keyPressed = {};
 let keyHit = {};
+
 window.addEventListener("keydown", (event) => {
     if (!keyDown[event.key]) {
         keyHit[event.key] = true;
@@ -51,11 +52,14 @@ function loadAsset(name, path) {
 }
 loadAsset("tiller", "assets/partick tiler.png");
 loadAsset("amongus", "assets/sussy.png");
-
+loadAsset("carrots", "assets/Carrots.png");
+loadAsset("tile", "assets/Closed.png");
+loadAsset("flag", "assets/Flag_R.png");
 
 
 let canvas = document.getElementById("canvas");
 let ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
 let t = 0;
 
 // // Object classes, will set up later
@@ -93,35 +97,6 @@ let t = 0;
 //     }
 // }
 
-
-
-let cameraX = 0;
-let cameraY = 0;
-let cameraZoom = 50;
-
-
-function drawCenteredRectangle(x, y, width, height) {
-    ctx.fillRect(x - width / 2, y - height / 2, width, height);
-}
-
-function drawCenteredImage(image, x, y, width, height) {
-    ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
-}
-
-function drawTile(x, y, width, height, image=null) {
-    // Transform based on camera parameters
-    x = x * cameraZoom - cameraX;
-    y = y * cameraZoom - cameraY;
-    width = width * cameraZoom;
-    height = height * cameraZoom;
-    // If there is no image we render a solid color rectangle instead
-    if (image) {
-        drawCenteredImage(image, x, y, width, height);
-    } else {
-        drawCenteredRectangle(x, y, width, height);
-    }
-}
-
 class tile {
     constructor(sprite = null, collidable = false) {
         this.collidable = collidable;
@@ -131,53 +106,115 @@ class tile {
 
 let tileTypes = {
     "air": new tile(null, false),
-    "grass": new tile(assets["tiller"], true),
-    "dirt": new tile(assets["amongus"], true)
+    "grass": new tile(assets["tile"], true),
+    "dirt": new tile(assets["flag"], true),
+    "flower": new tile(assets["tiller"], false),
 }
 
-
-let levelWidth = 20;
-let levelHeight = 20;
 const DEFAULT_TILE = {
     type: "grass"
 };
-const DEFAULT_BACK_TILE = {
-    type: "air"
-};
-let levelTiles = new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_TILE));
-let backTiles = new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_BACK_TILE));
-levelTiles[8][5] = {
-    type: "dirt"
-};
-output(levelTiles);
 
+let levelWidth = 100;
+let levelHeight = 100;
+let levelDepth = 1;
+let levelTiles = new Array(levelDepth).fill(null).map(() => new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_TILE)));
+for (let x = 0; x < levelWidth; x++) {
+    for (let y = 0; y < levelHeight; y++) {
+        if (Math.random() < 0.1) {
+            levelTiles[0][x][y] = {type: "dirt"};
+        }
+        if (Math.random() < 0.01) {
+            levelTiles[0][x][y] = {type: "flower"};
+        }
+    }
+}
+
+
+let cameraX = levelWidth / 2;
+let cameraY = levelHeight / 2;
+let cameraZoom = 50;
+
+
+function drawCenteredRectangle(x, y, width, height) {
+    ctx.fillRect(x - width / 2, y - height / 2, width, height);
+}
+
+function drawCenteredImage(image, x, y, width, height) {
+    ctx.drawImage(image, x - width / 2 + canvas.width / 2, y - height / 2 + canvas.height / 2, width, height);
+}
+
+function transformToWorldSpace(x, y) {
+    x = x / cameraZoom + cameraX;
+    y = y / cameraZoom + cameraY;
+    return {x: x, y: y};
+}
+
+function transformFromWorldSpace(x, y, width=null, height=null) {
+    x = (x - cameraX) * cameraZoom;
+    y = (y - cameraY) * cameraZoom;
+    if (width !== null) {
+        width = width * cameraZoom;
+    }
+    if (height !== null) {
+        height = height * cameraZoom;
+    }
+    return {x: x, y: y, width: width, height: height};
+}
+
+function drawTile(x, y, width, height, image=null) {
+    let transformed = transformFromWorldSpace(x, y, width, height);
+    x = transformed.x;
+    y = transformed.y;
+    width = transformed.width;
+    height = transformed.height;
+    if (x + width / 2 < -canvas.width / 2 || x - width / 2 > canvas.width / 2 || y + height / 2 < -canvas.height / 2 || y - height / 2 > canvas.height / 2) {
+        return;
+    }
+
+    // If there is no image we render a solid color rectangle instead
+    if (image) {
+        drawCenteredImage(image, x, y, width, height);
+    } else {
+        drawCenteredRectangle(x, y, width, height);
+    }
+}
 
 
 function renderFrame() {
     // Clear the canvas for the new frame
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    let x = 0;
-    ctx.font = "20px Arial";
     // Render all pressed keys as text
-    for (let key in keyDown) {
-        if (keyDown[key]) {
-            ctx.fillText(key, x, canvas.height / 2);
-            x += 30;
-        }
-    }
+    // let x = 0;
+    // ctx.font = "20px Arial";
+    // for (let key in keyDown) {
+    //     if (keyDown[key]) {
+    //         ctx.fillText(key, x, canvas.height / 2);
+    //         x += 30;
+    //     }
+    // }
 
     // Draw the tiles
     for (let x = 0; x < levelWidth; x++) {
         for (let y = 0; y < levelHeight; y++) {
-            let tileType = levelTiles[x][y].type;
+            let tileType = levelTiles[0][x][y].type;
             drawTile(x, y, 1, 1, tileTypes[tileType].sprite);
         }
     }
 }
-
+let panSpeed = 0.1;
+let zoomSpeed = 0.02;
 function updateGame() {
-    // output(t);
+    panSpeed = 5 / cameraZoom;
+    cameraY += panSpeed * ((keyDown["s"] ?? false) - (keyDown["w"] ?? false));
+    cameraX += panSpeed * ((keyDown["d"] ?? false) - (keyDown["a"] ?? false));
+    if (keyDown["e"]) {
+        cameraZoom *= 1 + zoomSpeed;
+    }
+    if (keyDown["q"]) {
+        cameraZoom /= 1 + zoomSpeed;
+    }
 }
 
 function gameTick() {
