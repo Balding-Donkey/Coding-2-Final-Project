@@ -7,6 +7,16 @@ window.addEventListener("error", (event) => {
     output("Error at " + event.filename + ":" + event.lineno + " - " + event.message);
 });
 
+let log = document.getElementById("log");
+let logButton = document.getElementById("loggleToggle");
+logButton.addEventListener("click", () => {
+    if (log.style.display === "none") {
+        log.style.display = "block";
+    } else {
+        log.style.display = "none";
+    }
+});
+
 
 // Keyboard input
 let keyDown = {};
@@ -31,6 +41,18 @@ function resetHitKeys() {
         keyHit[key] = false;
     }
 }
+
+// Import assets
+let assets = {};
+function loadAsset(name, path) {
+    let image = new Image();
+    image.src = path;
+    assets[name] = image;
+}
+loadAsset("tiller", "assets/partick tiler.png");
+loadAsset("amongus", "assets/sussy.png");
+
+
 
 let canvas = document.getElementById("canvas");
 let ctx = canvas.getContext("2d");
@@ -71,52 +93,65 @@ let t = 0;
 //     }
 // }
 
-let levelWidth = 20;
-let levelHeight = 20;
-const DEFAULT_TILE = "grass";
-let levelTiles = new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_TILE));
-levelTiles[0][5] = "dirt";
-output(levelTiles);
+
 
 let cameraX = 0;
 let cameraY = 0;
 let cameraZoom = 50;
 
 
-
-function drawRectangle(x, y, width, height) {
+function drawCenteredRectangle(x, y, width, height) {
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
 }
 
-let tileCtx = {
-    x: 0,
-    y: 0,
-    width: 50,
-    height: 50
+function drawCenteredImage(image, x, y, width, height) {
+    ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
 }
-function drawRectangleInTileContext(x, y, width, height) {
-    drawRectangle(tileCtx.x + x * tileCtx.width, tileCtx.y + y * tileCtx.height, width * tileCtx.width, height * tileCtx.height);
+
+function drawTile(x, y, width, height, image=null) {
+    // Transform based on camera parameters
+    x = x * cameraZoom - cameraX;
+    y = y * cameraZoom - cameraY;
+    width = width * cameraZoom;
+    height = height * cameraZoom;
+    // If there is no image we render a solid color rectangle instead
+    if (image) {
+        drawCenteredImage(image, x, y, width, height);
+    } else {
+        drawCenteredRectangle(x, y, width, height);
+    }
 }
 
 class tile {
-    constructor() {
-        this.collidable = false;
-        this.layer = 0;
-    }
-
-    draw(x, y) {
-        return
+    constructor(sprite = null, collidable = false) {
+        this.collidable = collidable;
+        this.sprite = sprite;
     }
 }
 
+let tileTypes = {
+    "air": new tile(null, false),
+    "grass": new tile(assets["tiller"], true),
+    "dirt": new tile(assets["amongus"], true)
+}
 
-// function drawTile(x, y, tileType) {
-//     tileCtx.x = cameraX;
-//     tileCtx.y = cameraY;
-//     tileCtx.width = cameraZoom;
-//     tileCtx.height = cameraZoom;
-//     tileTypes[tileType].draw(x, y);
-// }
+
+let levelWidth = 20;
+let levelHeight = 20;
+const DEFAULT_TILE = {
+    type: "grass"
+};
+const DEFAULT_BACK_TILE = {
+    type: "air"
+};
+let levelTiles = new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_TILE));
+let backTiles = new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_BACK_TILE));
+levelTiles[8][5] = {
+    type: "dirt"
+};
+output(levelTiles);
+
+
 
 function renderFrame() {
     // Clear the canvas for the new frame
@@ -133,12 +168,12 @@ function renderFrame() {
     }
 
     // Draw the tiles
-    // for (let x = 0; x < levelWidth; x++) {
-    //     for (let y = 0; y < levelHeight; y++) {
-    //         let tileType = levelTiles[x][y];
-    //         tileTypes[tileType].draw(x, y);
-    //     }
-    // }
+    for (let x = 0; x < levelWidth; x++) {
+        for (let y = 0; y < levelHeight; y++) {
+            let tileType = levelTiles[x][y].type;
+            drawTile(x, y, 1, 1, tileTypes[tileType].sprite);
+        }
+    }
 }
 
 function updateGame() {
