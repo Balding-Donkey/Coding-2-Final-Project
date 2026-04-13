@@ -7,6 +7,21 @@ window.addEventListener("error", (event) => {
     output("Error at " + event.filename + ":" + event.lineno + " - " + event.message);
 });
 
+
+// Import assets
+let assets = {};
+function loadAsset(name, path) {
+    let image = new Image();
+    image.src = "assets/" + path;
+    assets[name] = image;
+}
+loadAsset("tiller", "partick tiler.png");
+loadAsset("amongus", "sussy.png");
+loadAsset("carrots", "Carrots.png");
+loadAsset("tile", "Closed.png");
+loadAsset("flag", "Flag_R.png");
+
+
 let log = document.getElementById("log");
 let logButton = document.getElementById("loggleToggle");
 logButton.addEventListener("click", () => {
@@ -43,21 +58,18 @@ function resetHitKeys() {
     }
 }
 
-// Import assets
-let assets = {};
-function loadAsset(name, path) {
-    let image = new Image();
-    image.src = path;
-    assets[name] = image;
-}
-loadAsset("tiller", "assets/partick tiler.png");
-loadAsset("amongus", "assets/sussy.png");
-loadAsset("carrots", "assets/Carrots.png");
-loadAsset("tile", "assets/Closed.png");
-loadAsset("flag", "assets/Flag_R.png");
-
 
 let canvas = document.getElementById("canvas");
+let mouseWorldPos = {x: 0, y: 0};
+let mouseX = 0;
+let mouseY = 0;
+canvas.addEventListener("mousemove", (event) => {
+    let rect = canvas.getBoundingClientRect();
+    mouseX = event.clientX - rect.left - canvas.width / 2;
+    mouseY = event.clientY - rect.top - canvas.height / 2;
+    // mouseWorldPos = transformToWorldSpace(mouseX, mouseY); // Do this the game loop instead so that it happens when the camera is moved too
+});
+
 let ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 let t = 0;
@@ -108,7 +120,7 @@ let tileTypes = {
     "air": new tile(null, false),
     "grass": new tile(assets["tile"], true),
     "dirt": new tile(assets["flag"], true),
-    "flower": new tile(assets["tiller"], false),
+    "flower": new tile(assets["carrots"], false),
 }
 
 const DEFAULT_TILE = {
@@ -162,7 +174,7 @@ function transformFromWorldSpace(x, y, width=null, height=null) {
     return {x: x, y: y, width: width, height: height};
 }
 
-function drawTile(x, y, width, height, image=null) {
+function drawInWorldSpace(x, y, width, height, image=null) {
     let transformed = transformFromWorldSpace(x, y, width, height);
     x = transformed.x;
     y = transformed.y;
@@ -199,10 +211,14 @@ function renderFrame() {
     for (let x = 0; x < levelWidth; x++) {
         for (let y = 0; y < levelHeight; y++) {
             let tileType = levelTiles[0][x][y].type;
-            drawTile(x, y, 1, 1, tileTypes[tileType].sprite);
+            drawInWorldSpace(x, y, 1, 1, tileTypes[tileType].sprite);
         }
     }
+    screenPos = transformFromWorldSpace(mouseWorldPos.x, mouseWorldPos.y);
+    // output("Screen position: " + screenPos.x + ", " + screenPos.y);
+    drawCenteredImage(assets["tiller"], screenPos.x, screenPos.y, cameraZoom, cameraZoom);
 }
+
 let panSpeed = 0.1;
 let zoomSpeed = 0.02;
 function updateGame() {
@@ -215,6 +231,7 @@ function updateGame() {
     if (keyDown["q"]) {
         cameraZoom /= 1 + zoomSpeed;
     }
+    mouseWorldPos = transformToWorldSpace(mouseX, mouseY);
 }
 
 function gameTick() {
@@ -225,4 +242,6 @@ function gameTick() {
     requestAnimationFrame(gameTick);
 }
 
-requestAnimationFrame(gameTick);
+window.addEventListener("load", () => {
+    requestAnimationFrame(gameTick);
+});
