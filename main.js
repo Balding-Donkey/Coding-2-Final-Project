@@ -15,7 +15,6 @@ function logBase(base, x) {
 }
 
 
-
 // Import assets
 let assets = {};
 function loadAsset(name, path) {
@@ -127,7 +126,8 @@ function updateBindableInputs() {
     userInput["moveDown"] = ((keyDown["s"] ?? false) || (keyDown["ArrowDown"] ?? false));
     userInput["moveLeft"] = ((keyDown["a"] ?? false) || (keyDown["ArrowLeft"] ?? false));
     userInput["moveRight"] = ((keyDown["d"] ?? false) || (keyDown["ArrowRight"] ?? false));
-    userInput["jump"] = ((keyHit[" "] ?? false) || (keyHit["z"] ?? false));
+    userInput["jumpStart"] = ((keyHit[" "] ?? false));
+    userInput["jumpHold"] = ((keyDown[" "] ?? false));
     userInput["zoomIn"] = (keyDown["e"] ?? false);
     userInput["zoomOut"] = (keyDown["q"] ?? false);
 }
@@ -174,10 +174,13 @@ for (let x = 0; x < levelWidth; x++) {
 class dynamicObject {
     // Base class for objects that can move, does not include physics
     constructor() {
-        this.x = 0;
-        this.y = 0;
+        // Constants
         this.width = 1;
         this.height = 1;
+
+        // Variables
+        this.x = 0;
+        this.y = 0;
 }
 
     update() {
@@ -190,90 +193,100 @@ class dynamicObject {
 }
 
 function isSolidAt(z, x, y) {
+    // Returns whether tile in a given position is solid
     x = Math.round(x)
     y = Math.round(y)
+
+    // If the position is outside the level, treat it as not solid.
     if (x < 0 || x >= levelWidth || y < 0 || y >= levelHeight) {
-        return false // In the case of being out of bounds
+        return false
     }
     return tileTypes[levelTiles[z][x][y].type].collidable
 }
 
 function collisionGrid(z, x, y, width, height) {
-    const xLow = Math.round(x - width / 2);
-    const xHigh = Math.round(x + width / 2);
-    const yLow = Math.round(y - height / 2);
-    const yHigh = Math.round(y + height / 2);
+    // Returns a list of tile positions in a given rectangle and whether they are solid
+    // Also returns whether at least one was solid, for convenience
     let results = {tiles: [], collided: false,};
-    for (let x = xLow; x <= xHigh; x++) {
-        for (let y = yLow; y <= yHigh; y++) {
-            let solid = isSolidAt(0, x, y);
+    for (let v = (Math.round(x - width / 2)); v <= (Math.round(x + width / 2)); v++) {
+        for (let w = (Math.round(y - height / 2)); w <= (Math.round(y + height / 2)); w++) {
+            let solid = isSolidAt(0, v, w);
             if (solid) {
                 results.collided = true;
             }
             results.tiles.push({
                 solid: solid,
-                x: x,
-                y: y,
+                x: v,
+                y: w,
             });
         }
     }
     return results
 }
-
-const MARGIN = 2 ** -40 // The minimum distance from a physical object from a tile, setting it too low will break collision. Should not be much lower than 2^-40
+const MARGIN = 2 ** -40 // The minimum distance from a physical object from a tile, prevents the object from being pushed in a direction perpendicular to the tile it is touching
 
 function collisionX(object) {
     object.touching.left = false;
     object.touching.right = false;
+    // Move the object
     object.x += object.vx;
-        let collisionResults = collisionGrid(0, object.x, object.y, object.width, object.height);
-        if (collisionResults.collided) {
-            object.vx = 0;
-            for (let i = 0; i < collisionResults.tiles.length; i++) {
-                let tile = collisionResults.tiles[i];
-                if (tile.solid) {
-                    if (tile.x < object.x) {
-                        object.x = tile.x + 0.5 + MARGIN + object.width / 2;
-                        object.touching.left = true;
-                    } else {
-                        object.x = tile.x - 0.5 - MARGIN - object.width / 2;
-                        object.touching.right = true;
-                    }
+    // Find where the object is now intersecting with tiles
+    let collisionResults = collisionGrid(0, object.x, object.y, object.width, object.height);
+    if (collisionResults.collided) {
+        object.vx = 0;
+        // Iterate through all of the tiles
+        for (let i = 0; i < collisionResults.tiles.length; i++) {
+            let tile = collisionResults.tiles[i];
+            if (tile.solid) {
+                // If the tile is to the left of the object, move the object right
+                if (tile.x < object.x) {
+                    object.x = tile.x + 0.5 + MARGIN + object.width / 2;
+                    object.touching.left = true;
+                // Otherwise, move it left
+                } else {
+                    object.x = tile.x - 0.5 - MARGIN - object.width / 2;
+                    object.touching.right = true;
                 }
             }
         }
+    }
 }
 
 function collisionY(object) {
+    // Very similar to collisionX, but uses different variables. Maybe there's a way to condense these into one function?
     object.touching.up = false;
     object.touching.down = false;
     object.y += object.vy;
-        let collisionResults = collisionGrid(0, object.x, object.y, object.width, object.height);
-        if (collisionResults.collided) {
-            object.vy = 0;
-            for (let i = 0; i < collisionResults.tiles.length; i++) {
-                let tile = collisionResults.tiles[i];
-                if (tile.solid) {
-                    if (tile.y < object.y) {
-                        object.y = tile.y + 0.5 + MARGIN + object.height / 2;
-                        object.touching.up = true;
-                    } else {
-                        object.y = tile.y - 0.5 - MARGIN - object.height / 2;
-                        object.touching.down = true;
-                    }
+    let collisionResults = collisionGrid(0, object.x, object.y, object.width, object.height);
+    if (collisionResults.collided) {
+        object.vy = 0;
+        for (let i = 0; i < collisionResults.tiles.length; i++) {
+            let tile = collisionResults.tiles[i];
+            if (tile.solid) {
+                if (tile.y < object.y) {
+                    object.y = tile.y + 0.5 + MARGIN + object.height / 2;
+                    object.touching.up = true;
+                } else {
+                    object.y = tile.y - 0.5 - MARGIN - object.height / 2;
+                    object.touching.down = true;
                 }
             }
         }
+    }
 }
 
 class physicalObject extends dynamicObject {
     // Base class for objects that collide with walls and experience gravity
     constructor() {
         super();
+        // Constants
+        this.gravityY = 0.025;
+        this.friction = 0.7;
+        this.airResistance = 0.8;
+
+        // Variables
         this.vx = 0;
         this.vy = 0;
-        this.gravityY = 0.01;
-        this.friction = 0.7;
         this.touching = {
             left: false,
             right: false,
@@ -284,15 +297,19 @@ class physicalObject extends dynamicObject {
 
     update() {
         super.update();
-        this.vx *= this.friction;
-        this.vy += this.gravityY;
         // this.vy *= this.friction;
-        if (this.vx > this.vy) {
+        // Move along the axis which has higher velocity first
+        if (Math.abs(this.vx) > Math.abs(this.vy)) {
             collisionX(this);
             collisionY(this);
         } else {
             collisionY(this);
             collisionX(this);
+        }
+        if (this.touching.down || this.touching.up) {
+            this.vx *= this.friction;
+        } else {
+            this.vx *= this.airResistance;
         }
     }
 
@@ -305,24 +322,86 @@ class playerObject extends physicalObject {
     // Player object controlled by the user
     constructor() {
         super();
-        this.walkSpeed = 0.1; // The maximum speed the player will move at
-        this.jumpPower = 0.22;
-        this.acceleration = (this.walkSpeed * (1 - this.friction) / this.friction); // This formula calculates the acceleration needed to reach the max speed with the specified friction
+        // Constant Overrides
         this.width = 0.8;
         this.height = 1.5;
+
+        // Constants
+        this.walkSpeed = 0.08; // The maximum speed the player will move at
+        this.acceleration = (this.walkSpeed * (1 - this.friction) / this.friction); // This formula calculates the acceleration needed to reach the max speed with the specified friction
+        this.fallSpeed = 0.5;
+
+        // Variables
+        this.freeFlight = false;
+
+        // Constants (Jumping)
+        this.jumpGravity = 0.01; // The gravity used during a jump
+        this.jumpLength = 10; // The amount of frames the player can hold jump for
+        this.jumpPower = 0.25; // The velocity of the jump
+        this.coyoteFrames = 5; // The amount of frames after falling off a ledge that the player can still jump
+        this.jumpBufferFrames = 5; // The amount of frames that the player can press jump early
+        this.jumpBoost = 1.1; // Speed multiplier applied when the player jumps
+        this.airBoost = 1.5; // Multiplier for natural max speed while in the air
+        this.airControl = (this.airBoost * this.walkSpeed * (1 - this.airResistance) / this.airResistance);
+
+        // Variables (Jumping)
+        this.jumpTime = 0;
+        // this.jumpState = 0;
+        this.floorTimeDistance = 0; // The amount of coyote frames remaining
+        this.jumpBuffer = 0;
     }
 
     update() {
-        this.vx += this.acceleration * (userInput["moveRight"] - userInput["moveLeft"]);
-        // this.vy += this.acceleration * (userInput["moveDown"] - userInput["moveUp"]);
-        if (userInput.jump && this.touching.down) {
-            this.vy = -this.jumpPower;
+        if (userInput.jumpStart) {
+            this.jumpBuffer = this.jumpBufferFrames;
+        } else {
+            this.jumpBuffer -= 1;
         }
-        super.update();
+        if (this.freeFlight) {
+            this.x = cameraX;
+            this.y = cameraY;
+        } else {
+            if (this.touching.down) {
+                this.floorTimeDistance = this.coyoteFrames;
+                this.jumpTime = this.jumpLength
+                this.vx += this.acceleration * (userInput["moveRight"] - userInput["moveLeft"]);
+            } else {
+                this.floorTimeDistance -= 1;
+                this.vx += this.airControl * (userInput["moveRight"] - userInput["moveLeft"]);
+            }
+
+            if ((this.jumpBuffer > 0 && this.floorTimeDistance > 0) || (userInput.jumpHold && this.jumpTime > 0 && this.jumpTime < this.jumpLength)) {
+                if (this.jumpBuffer > 0 && this.floorTimeDistance > 0) {
+                    this.vx *= this.jumpBoost;
+                }
+                this.vy = -this.jumpPower;
+                this.floorTimeDistance = 0;
+                this.jumpTime -= 1;
+                this.jumpBuffer = 0
+            } else if (!userInput.jumpHold && this.floorTimeDistance <= 0) {
+                this.jumpTime = 0;
+            }
+
+            // Limit the speed the player can fall at
+            this.vy = Math.min(this.vy, this.fallSpeed);
+            
+            // Apply a lower gravity while jumping (Unused)
+            if (false && (this.vy < 0 && userInput.jumpHold)) {
+                this.vy += this.jumpGravity;
+            } else {
+                this.vy += this.gravityY;
+            }
+
+            super.update();
+
+            if (this.touching.up) {
+                this.jumpTime = 0;
+            }
+        }
     }
 
     render() {
-        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["tile"]);
+        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["tiller"]);
     }
 }
 
@@ -335,7 +414,8 @@ let levelObjects = [player];
 // Camera variables
 let cameraX = levelWidth / 2;
 let cameraY = levelHeight / 2;
-let cameraZoom = 70;
+let defaultZoom = 48;
+let cameraZoom = defaultZoom;
 
 
 // Rendering
@@ -405,34 +485,35 @@ function renderFrame() {
         levelObjects[i].render();
     }
 
-    // Render all pressed keys as text
-    let x = 0;
-    ctx.font = "20px Arial";
-    for (let key in keyDown) {
-        if (keyDown[key]) {
-            ctx.fillText(key, x, canvasHeight / 2);
-            x += 30;
-        }
-    }
-    ctx.fillText(JSON.stringify(player.touching), 0, 100)
+    // Render all pressed keys as text, debug
+    // let x = 0;
+    // ctx.font = "20px Arial";
+    // for (let key in keyDown) {
+    //     if (keyDown[key]) {
+    //         ctx.fillText(key, x, canvasHeight / 2);
+    //         x += 30;
+    //     }
+    // }
+    // ctx.fillText(JSON.stringify(player.touching), 0, 100) // Debug
 }
 
 
 
 // Basic game logic
 
-let panSpeed = 0.1;
+let panSpeed = 0;
 let zoomSpeed = 0.02;
 let freeCam = false;
 
 function updateGame() {
+    // Update objects
     for (let i = 0; i < levelObjects.length; i++) {
         levelObjects[i].update();
     }
 
     // Free camera movement
     if (freeCam) {
-        panSpeed = 5 / cameraZoom;
+        panSpeed = 0.2 * Math.sqrt(defaultZoom / cameraZoom);
         cameraY += panSpeed * (userInput["moveDown"] - userInput["moveUp"]);
         cameraX += panSpeed * (userInput["moveRight"] - userInput["moveLeft"]);
         if (userInput["zoomIn"]) {
@@ -450,7 +531,15 @@ function updateGame() {
     mouseGridPos.x = Math.round(mouseWorldPos.x);
     mouseGridPos.y = Math.round(mouseWorldPos.y);
     if (mouseDown && mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
-        levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "flower"};
+        levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
+    }
+
+    if (keyHit["z"]) {
+        freeCam = !freeCam;
+        if (!freeCam) {
+            cameraZoom = defaultZoom;
+        }
+        player.freeFlight = !player.freeFlight;
     }
 }
 
