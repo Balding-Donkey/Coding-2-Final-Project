@@ -1,4 +1,4 @@
-// Error logging and output to get around the fact that I can't use the developer console
+// Error logging and output to get around the fact that I can't use the developer console on a school chromebook
 let textLog = document.getElementById("textLog");
 function output(string) {
     textLog.innerHTML = textLog.innerHTML + string + "<br>";
@@ -223,11 +223,11 @@ function collisionGrid(z, x, y, width, height) {
     }
     return results
 }
-const MARGIN = 2 ** -40 // The minimum distance from a physical object from a tile, prevents the object from being pushed in a direction perpendicular to the tile it is touching
+const MARGIN = 2 ** -40 // The minimum distance from a physical object from a tile, prevents the object from being pushed in a direction perpendicular to the tile it is touchingHard
 
 function collisionX(object) {
-    object.touching.left = false;
-    object.touching.right = false;
+    object.touchingHard.left = false;
+    object.touchingHard.right = false;
     // Move the object
     object.x += object.vx;
     // Find where the object is now intersecting with tiles
@@ -241,11 +241,11 @@ function collisionX(object) {
                 // If the tile is to the left of the object, move the object right
                 if (tile.x < object.x) {
                     object.x = tile.x + 0.5 + MARGIN + object.width / 2;
-                    object.touching.left = true;
+                    object.touchingHard.left = true;
                 // Otherwise, move it left
                 } else {
                     object.x = tile.x - 0.5 - MARGIN - object.width / 2;
-                    object.touching.right = true;
+                    object.touchingHard.right = true;
                 }
             }
         }
@@ -254,8 +254,8 @@ function collisionX(object) {
 
 function collisionY(object) {
     // Very similar to collisionX, but uses different variables. Maybe there's a way to condense these into one function?
-    object.touching.up = false;
-    object.touching.down = false;
+    object.touchingHard.up = false;
+    object.touchingHard.down = false;
     object.y += object.vy;
     let collisionResults = collisionGrid(0, object.x, object.y, object.width, object.height);
     if (collisionResults.collided) {
@@ -265,10 +265,10 @@ function collisionY(object) {
             if (tile.solid) {
                 if (tile.y < object.y) {
                     object.y = tile.y + 0.5 + MARGIN + object.height / 2;
-                    object.touching.up = true;
+                    object.touchingHard.up = true;
                 } else {
                     object.y = tile.y - 0.5 - MARGIN - object.height / 2;
-                    object.touching.down = true;
+                    object.touchingHard.down = true;
                 }
             }
         }
@@ -287,12 +287,12 @@ class physicalObject extends dynamicObject {
         // Variables
         this.vx = 0;
         this.vy = 0;
-        this.touching = {
+        this.touchingHard = {
             left: false,
             right: false,
             up: false,
             down: false,
-        } // Each value is true if the object is being pushed into a tile in that direction. It will not be true if the object is visibly touching the tile but not being pushed into it.
+        } // Each value is true if the object is being pushed into a tile in that direction. It will not be true if the object is visibly touchingHard the tile but not being pushed into it.
     }
 
     update() {
@@ -306,7 +306,7 @@ class physicalObject extends dynamicObject {
             collisionY(this);
             collisionX(this);
         }
-        if (this.touching.down || this.touching.up) {
+        if (this.touchingHard.down || this.touchingHard.up) {
             this.vx *= this.friction;
         } else {
             this.vx *= this.airResistance;
@@ -361,7 +361,7 @@ class playerObject extends physicalObject {
             this.x = cameraX;
             this.y = cameraY;
         } else {
-            if (this.touching.down) {
+            if (this.touchingHard.down) {
                 this.floorTimeDistance = this.coyoteFrames;
                 this.jumpTime = this.jumpLength
                 this.vx += this.acceleration * (userInput["moveRight"] - userInput["moveLeft"]);
@@ -394,7 +394,7 @@ class playerObject extends physicalObject {
 
             super.update();
 
-            if (this.touching.up) {
+            if (this.touchingHard.up) {
                 this.jumpTime = 0;
             }
         }
@@ -494,7 +494,7 @@ function renderFrame() {
     //         x += 30;
     //     }
     // }
-    // ctx.fillText(JSON.stringify(player.touching), 0, 100) // Debug
+    // ctx.fillText(JSON.stringify(player.touchingHard), 0, 100) // Debug
 }
 
 
@@ -544,15 +544,30 @@ function updateGame() {
 }
 
 
+const MAX_FPS = 60;
+const FRAME_DURATION = 1000 / MAX_FPS;
+
 // Game loop
+let lastTime = performance.now();
 function gameTick() {
+    requestAnimationFrame(gameTick);
+
+    let currentTime = performance.now();
+    let deltaTime = currentTime - lastTime;
+
+    if (deltaTime < FRAME_DURATION) {
+        return;
+    }
+
     // Here we increment the frame counter, update user input, update the game state, render the game, reset the user input, and request the next frame.
     t += 1;
     updateBindableInputs();
     updateGame();
     renderFrame();
     resetInput();
-    requestAnimationFrame(gameTick);
+
+    const extraTime = deltaTime - FRAME_DURATION;
+    lastTime = currentTime - extraTime;
 }
 
 
