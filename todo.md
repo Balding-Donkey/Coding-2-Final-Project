@@ -1,0 +1,11 @@
+To Do:
+- Add keybinds
+- Add finalised assets
+- Add level system (load from json files)
+- Add level editor
+- Add levels
+- Add backgrounds/foregrounds
+- Add camera controller objects (area, gradient, barrier, zoom, offset, etc.)
+- Add gameplay mechanics (walljumping, hazards, etc.)
+- Fix gamepad bug
+- Add menus (settings, level select)
