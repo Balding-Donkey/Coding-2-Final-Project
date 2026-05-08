@@ -13,6 +13,9 @@ window.addEventListener("error", (event) => {
 function logBase(base, x) {
     return Math.log(x) / Math.log(base)
 }
+function clamp(x, min, max) {
+    return Math.min(Math.max(x, min), max);
+}
 
 
 // Import assets
@@ -80,33 +83,68 @@ canvas.addEventListener("mousemove", (event) => {
     // mouseWorldPos = transformToWorldSpace(mouseX, mouseY); // Do this in the game loop instead so that it happens when the camera is moved too
 });
 
-let mouseDown = false; // Whether the user is currently holding the primary mouse button
-let mouseClicked = false; // Whether the user clicked the primary mouse button this frame (true for one frame)
+let primaryMouseDown = false; // Whether the user is currently holding the primary mouse button
+let primaryMouseClicked = false; // Whether the user clicked the primary mouse button this frame (true for one frame)
+let secondaryMouseDown = false; // Whether the user is currently holding the secondary mouse button
+let secondaryMouseClicked = false; // Whether the user clicked the secondary mouse button this frame (true for one frame)
 // Uses canvas so that offscreen clicks won't be registered.
 canvas.addEventListener("mousedown", (event) => {
-    if (event.button !== 0) {
-        return;
+    switch (event.button) {
+        case 0:
+            primaryMouseDown = true;
+            primaryMouseClicked = true;
+            break;
+        case 2:
+            secondaryMouseDown = true;
+            secondaryMouseClicked = true;
+            break;
     }
-    mouseDown = true;
-    mouseClicked = true;
 });
 /* Uses document instead of canvas so the click won't stay registered if the user moses the mouse off the canvas.
 This still allows the user to keep the mouse held by switching tabs, which is an intentional choice. */
 document.addEventListener("mouseup", (event) => {
-    if (event.button !== 0) {
-        return;
+    switch (event.button) {
+        case 0:
+            primaryMouseDown = false;
+        case 2:
+            secondaryMouseDown = false;
     }
-    mouseDown = false;
 });
+
+// Gamepad input
+const GAMEPAD_DEADZONE = 0.2; // The minimum value for gamepad axes to be registered, prevents drift
+let gamepadDown = {}; // A map of gamepad buttons that are currently held down
+let gamepadHit = {}; // A map of gamepad buttons which have been pressed this frame
+let gamepadAxes = {};
+function updateGamepadInput() {
+    let gamepad = navigator.getGamepads()[0];
+    if (gamepad) {
+        for (let i = 0; i < gamepad.buttons.length; i++) {
+            if (gamepad.buttons[i].pressed && !gamepad.buttons[i].previouslyPressed) {
+                gamepadHit[i] = true;
+            }
+            gamepadDown[i] = gamepad.buttons[i].pressed;
+        }
+        for (let i = 0; i < gamepad.axes.length; i++) {
+            gamepadAxes[i] = Math.abs(gamepad.axes[i]) > GAMEPAD_DEADZONE ? gamepad.axes[i] : 0;
+        }
+    }
+}
+        
+    
 
 // Reset keys hit and mouse clicked each frame
 function resetInput() {
-    mouseClicked = false;
+    primaryMouseClicked = false;
+    secondaryMouseClicked = false;
     for (let key in keyPressed) {
         keyPressed[key] = false;
     }
     for (let key in keyHit) {
         keyHit[key] = false;
+    }
+    for (let key in gamepadHit) {
+        gamepadHit[key] = false;
     }
 }
 
@@ -118,18 +156,22 @@ let userInput = {
     "jump": false,
     "zoomIn": false,
     "zoomOut": false,
+    "toggleFreeCamMode": false,
 };
 function updateBindableInputs() {
     // Handles inputs with multiple or changeable binds
     // Binds being set by variables will be added later
-    userInput["moveUp"] = ((keyDown["w"] ?? false) || (keyDown["ArrowUp"] ?? false));
-    userInput["moveDown"] = ((keyDown["s"] ?? false) || (keyDown["ArrowDown"] ?? false));
-    userInput["moveLeft"] = ((keyDown["a"] ?? false) || (keyDown["ArrowLeft"] ?? false));
-    userInput["moveRight"] = ((keyDown["d"] ?? false) || (keyDown["ArrowRight"] ?? false));
-    userInput["jumpStart"] = ((keyHit[" "] ?? false));
-    userInput["jumpHold"] = ((keyDown[" "] ?? false));
-    userInput["zoomIn"] = (keyDown["e"] ?? false);
-    userInput["zoomOut"] = (keyDown["q"] ?? false);
+    updateGamepadInput();
+    userInput["moveUp"] = ((keyDown["w"] ?? false) || (keyDown["ArrowUp"] ?? false) || (gamepadAxes[1] ?? 0) < 0 || (gamepadDown[12] ?? false));
+    userInput["moveDown"] = ((keyDown["s"] ?? false) || (keyDown["ArrowDown"] ?? false) || (gamepadAxes[1] ?? 0) > 0);
+    userInput["moveLeft"] = ((keyDown["a"] ?? false) || (keyDown["ArrowLeft"] ?? false) || (gamepadAxes[0] ?? 0) < 0);
+    userInput["moveRight"] = ((keyDown["d"] ?? false) || (keyDown["ArrowRight"] ?? false) || (gamepadAxes[0] ?? 0) > 0);
+    userInput["jumpStart"] = ((keyHit[" "] ?? false) || (gamepadHit[0] ?? false));
+    userInput["jumpHold"] = ((keyDown[" "] ?? false) || (gamepadDown[0] ?? false));
+    userInput["zoomIn"] = ((keyDown["e"] ?? false) || (gamepadDown[7] ?? false));
+    userInput["zoomOut"] = ((keyDown["q"] ?? false) || (gamepadDown[6] ?? false));
+    userInput["toggleFreeCamMode"] = ((keyHit["z"] ?? false) || (gamepadHit[3] ?? false));
+
 }
 
 
@@ -167,6 +209,86 @@ for (let x = 0; x < levelWidth; x++) {
     }
 }
 
+
+// Camera
+class cameraObject {
+    /*
+    Camera system explained:
+    The camera has a "target position" which it always moves towards.
+    The target position consists of the players position, plus an offset determined by other logic.
+    When the player has been falling at max speed for long enough, the camera starts moving downwards to a set distance.
+    When the player stops falling at max speed, it starts moving back to the normal height
+    When the player attempts to walk in a direction, the camera moves in that direction until it reaches a set distance.
+    If the player stops moving, the X offset will not change
+    */
+
+    constructor() {
+        // Constants
+        this.defaultZoom = 48;
+        this.zoomSpeed = 0.02; // The speed that the camera zooms when in freecam mode
+        this.lerp = 0.2; // The speed that the camera moves towards the target position, lower values make it smoother
+        this.xOffsetMagnitude = 1; // The distance, in tiles, that the camera will be offset ahead of the player
+        this.xOffsetSpeed = 0.2; // The speed that the x offset will move
+        this.yOffsetMagnitude = 4; // The distance, in tiles, that the camera will move down while the player is falling
+        this.yOffsetSpeed = 0.05; // The speed that the y offset will move at
+        this.yOffsetReturnSpeed = 0.1; // The speed that the y offset will move back to 0 when the player stops falling
+        this.yOffsetDelay = 30; // The amount of time the player must be at max fall speed before the camera starts getting offset
+
+        // Variables
+        this.x = levelWidth / 2;
+        this.y = levelHeight / 2;
+        this.zoom = this.defaultZoom;
+        this.panSpeed = 0;
+        this.freeMode = false;
+        this.xOffset = 0; // How far the camera is offset from the player horizontally
+        this.yOffset = 0; // How far the camera is offset from the player vertically
+        this.quickFallingTime = 0; // How long the player has been falling at max speed for (might be moved to the player object in the future)
+    }
+
+    position() {
+        if (this.freeMode) {
+            this.panSpeed = 0.2 * Math.sqrt(this.defaultZoom / this.zoom);
+            this.y += this.panSpeed * (userInput["moveDown"] - userInput["moveUp"]);
+            this.x += this.panSpeed * (userInput["moveRight"] - userInput["moveLeft"]);
+            if (userInput["zoomIn"]) {
+                this.zoom *= 1 + this.zoomSpeed;
+            }
+            if (userInput["zoomOut"]) {
+                this.zoom /= 1 + this.zoomSpeed;
+            }
+        } else {
+            this.xOffset = clamp(this.xOffset + (userInput["moveRight"] - userInput["moveLeft"]) * this.xOffsetSpeed, -1, 1);
+            let targetX = player.x + this.xOffset * this.xOffsetMagnitude;
+            
+            if (player.vy >= player.fallSpeed) {
+                this.quickFallingTime += 1;
+            } else {
+                this.quickFallingTime = 0;
+            }
+            if (this.quickFallingTime >= this.yOffsetDelay) {
+                this.yOffset = clamp(this.yOffset + this.yOffsetSpeed, 0, 1);
+            } else {
+                this.yOffset = clamp(this.yOffset - this.yOffsetReturnSpeed, 0, 1);
+            }
+            let targetY = player.y + this.yOffset * this.yOffsetMagnitude;
+            if (player.vy >= player.fallSpeed) {
+                targetY += 1;
+            }
+
+            this.x += (targetX - this.x) * this.lerp;
+            this.y += (targetY - this.y) * this.lerp;
+        }
+        
+        if (userInput["toggleFreeCamMode"]) {
+            this.freeMode = !this.freeMode;
+            if (!this.freeMode) {
+                this.zoom = this.defaultZoom;
+            }
+            player.freeFlight = !player.freeFlight;
+        }
+    }
+}
+let camera = new cameraObject();
 
 
 // Objects
@@ -358,8 +480,8 @@ class playerObject extends physicalObject {
             this.jumpBuffer -= 1;
         }
         if (this.freeFlight) {
-            this.x = cameraX;
-            this.y = cameraY;
+            this.x = camera.x;
+            this.y = camera.y;
         } else {
             if (this.touchingHard.down) {
                 this.floorTimeDistance = this.coyoteFrames;
@@ -411,13 +533,6 @@ let player = new playerObject();
 let levelObjects = [player];
 
 
-// Camera variables
-let cameraX = levelWidth / 2;
-let cameraY = levelHeight / 2;
-let defaultZoom = 48;
-let cameraZoom = defaultZoom;
-
-
 // Rendering
 
 function drawCenteredRectangle(x, y, width, height) {
@@ -429,19 +544,19 @@ function drawCenteredImage(image, x, y, width, height) {
 }
 
 function transformToWorldSpace(x, y) {
-    x = x / cameraZoom + cameraX;
-    y = y / cameraZoom + cameraY;
+    x = x / camera.zoom + camera.x;
+    y = y / camera.zoom + camera.y;
     return {x: x, y: y};
 }
 
 function transformFromWorldSpace(x, y, width=null, height=null) {
-    x = (x - cameraX) * cameraZoom;
-    y = (y - cameraY) * cameraZoom;
+    x = (x - camera.x) * camera.zoom;
+    y = (y - camera.y) * camera.zoom;
     if (width !== null) {
-        width = width * cameraZoom;
+        width = width * camera.zoom;
     }
     if (height !== null) {
-        height = height * cameraZoom;
+        height = height * camera.zoom;
     }
     return {x: x, y: y, width: width, height: height};
 }
@@ -494,16 +609,11 @@ function renderFrame() {
     //         x += 30;
     //     }
     // }
-    // ctx.fillText(JSON.stringify(player.touchingHard), 0, 100) // Debug
+    ctx.fillText(JSON.stringify(gamepadHit), 0, 100) // Debug
 }
 
 
-
 // Basic game logic
-
-let panSpeed = 0;
-let zoomSpeed = 0.02;
-let freeCam = false;
 
 function updateGame() {
     // Update objects
@@ -511,35 +621,18 @@ function updateGame() {
         levelObjects[i].update();
     }
 
-    // Free camera movement
-    if (freeCam) {
-        panSpeed = 0.2 * Math.sqrt(defaultZoom / cameraZoom);
-        cameraY += panSpeed * (userInput["moveDown"] - userInput["moveUp"]);
-        cameraX += panSpeed * (userInput["moveRight"] - userInput["moveLeft"]);
-        if (userInput["zoomIn"]) {
-            cameraZoom *= 1 + zoomSpeed;
-        }
-        if (userInput["zoomOut"]) {
-            cameraZoom /= 1 + zoomSpeed;
-        }
-    } else {
-        cameraX = player.x;
-        cameraY = player.y;
-    }
+    camera.position();
 
     mouseWorldPos = transformToWorldSpace(mouseX, mouseY);
     mouseGridPos.x = Math.round(mouseWorldPos.x);
     mouseGridPos.y = Math.round(mouseWorldPos.y);
-    if (mouseDown && mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
-        levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
-    }
-
-    if (keyHit["z"]) {
-        freeCam = !freeCam;
-        if (!freeCam) {
-            cameraZoom = defaultZoom;
+    if (mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
+        if (primaryMouseDown) {
+            levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
         }
-        player.freeFlight = !player.freeFlight;
+        if (secondaryMouseDown) {
+            levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
+        }
     }
 }
 
@@ -554,7 +647,9 @@ function gameTick() {
 
     let currentTime = performance.now();
     let deltaTime = currentTime - lastTime;
+    // console.log(1000 / deltaTime); // Shows framerate for debugging
 
+    // If there has not been enough time since the last frame, skip this update
     if (deltaTime < FRAME_DURATION) {
         return;
     }
@@ -566,7 +661,7 @@ function gameTick() {
     renderFrame();
     resetInput();
 
-    const extraTime = deltaTime - FRAME_DURATION;
+    const extraTime = deltaTime % FRAME_DURATION; // A basic framerate limit will actually run slower than the specified framerate, this accounts for the lost time
     lastTime = currentTime - extraTime;
 }
 
