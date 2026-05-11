@@ -14,6 +14,4 @@ Gamepad controls:
 - Y to toggle free camera mode
 - LT/RT to zoom in or out while in free cam
 
-Note: Gamepad controls do not work properly at the moment
-
 [Play in browser](https://balding-donkey.github.io/Coding-2-Final-Project/)

@@ -120,7 +120,7 @@ function updateGamepadInput() {
     let gamepad = navigator.getGamepads()[0];
     if (gamepad) {
         for (let i = 0; i < gamepad.buttons.length; i++) {
-            if (gamepad.buttons[i].pressed && !gamepad.buttons[i].previouslyPressed) {
+            if (gamepad.buttons[i].pressed && !gamepadDown[i]) {
                 gamepadHit[i] = true;
             }
             gamepadDown[i] = gamepad.buttons[i].pressed;
