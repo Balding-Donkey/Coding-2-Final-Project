@@ -58,8 +58,16 @@ ctx.translate((canvas.width - canvasWidth) / 2, (canvas.height - canvasHeight) /
 let keyDown = {}; // A map of keys that are currently held down
 let keyPressed = {}; // A map of keys which have been pressed this frame, behaves like typing, so holding one will cause it to fire repeatedly
 let keyHit = {}; // A map of which keys have been hit this frame (true for one frame)
+let shortcutsHit = {}; // A map of keyboard shortcuts that have been hit this frame
+const overridenShortcuts = ["s","o"]; // A list of keys that have their default browser shortcuts overridden
 
 window.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && overridenShortcuts.includes(event.key)) {
+        event.preventDefault();
+        if (!keyDown[event.key]) {
+            shortcutsHit[event.key] = true;
+        }
+    }
     if (!keyDown[event.key]) {
         keyHit[event.key] = true;
     }
@@ -146,6 +154,9 @@ function resetInput() {
     for (let key in gamepadHit) {
         gamepadHit[key] = false;
     }
+    for (let key in shortcutsHit) {
+        shortcutsHit[key] = false;
+    }
 }
 
 let userInput = {
@@ -185,6 +196,12 @@ class tile {
     }
 }
 
+const DEFAULT_TILE = {type: "air"};
+
+function tileGrid(depth, width, height, defaultTile = DEFAULT_TILE) {
+    return new Array(depth).fill(null).map(() => new Array(width).fill(null).map(() => new Array(height).fill(defaultTile)));
+}
+
 let tileTypes = {
     "air": new tile(null, false),
     "grass": new tile(assets["tile"], true),
@@ -192,12 +209,10 @@ let tileTypes = {
     "flower": new tile(assets["carrots"], false),
 }
 
-const DEFAULT_TILE = {type: "air"};
-
 let levelWidth = 100;
 let levelHeight = 100;
 let levelDepth = 1;
-let levelTiles = new Array(levelDepth).fill(null).map(() => new Array(levelWidth).fill(null).map(() => new Array(levelHeight).fill(DEFAULT_TILE)));
+let levelTiles = tileGrid(levelDepth, levelWidth, levelHeight);
 for (let x = 0; x < levelWidth; x++) {
     for (let y = 0; y < levelHeight; y++) {
         if (Math.random() < 0.2) {
@@ -527,10 +542,35 @@ class playerObject extends physicalObject {
     }
 }
 
+class testObject extends dynamicObject {
+    constructor() {
+        super();
+        this.width = 0.8;
+        this.height = 0.8;
+    }
 
+    update() {
+        super.update();
+        this.x += 0.01;
+    }
+
+    render() {
+        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["amongus"]);
+    }
+}
+
+
+const classes = {
+    dynamicObject: dynamicObject,
+    physicalObject: physicalObject,
+    playerObject: playerObject,
+    cameraObject: cameraObject,
+    tile: tile,
+    testObject: testObject,
+};
 // Required objects
 let player = new playerObject();
-let levelObjects = [player];
+let levelObjects = [player, new testObject(),];
 
 
 // Rendering
@@ -613,6 +653,140 @@ function renderFrame() {
 }
 
 
+// For loading/saving levels, these 2 functions are my own code
+
+function stringifyLevelData() {
+    let tileIDsStrings = {};
+    let tileIDs = {};
+    let reverseTileIDs = {};
+    let savingTiles = structuredClone(levelTiles);
+    for (let z = 0; z < levelDepth; z++) {
+        for (let x = 0; x < levelWidth; x++) {
+            for (let y = 0; y < levelHeight; y++) {
+                let tile = levelTiles[z][x][y];
+                let tileString = JSON.stringify(tile);
+                if (!Object.values(tileIDsStrings).includes(tileString)) {
+                    tileIDsStrings[Object.keys(tileIDsStrings).length] = tileString;
+                    tileIDs[Object.keys(tileIDs).length] = tile;
+                    reverseTileIDs[tileString] = Object.keys(tileIDsStrings).length - 1;
+                }
+            }
+        }
+    }
+    for (let z = 0; z < levelDepth; z++) {
+        for (let x = 0; x < levelWidth; x++) {
+            for (let y = 0; y < levelHeight; y++) {
+                let tile = levelTiles[z][x][y];
+                let tileString = JSON.stringify(tile);
+                savingTiles[z][x][y] = reverseTileIDs[tileString];
+            }
+        }
+    }
+    let savingObjects = [];
+    for (let i = 0; i < levelObjects.length; i++) {
+        let object = levelObjects[i];
+        if (!(object instanceof playerObject)) {
+            savingObjects.push({
+                type: object.constructor.name,
+                data: object,
+            });
+        }
+    }
+    return JSON.stringify({
+        width: levelWidth,
+        height: levelHeight,
+        depth: levelDepth,
+        objects: savingObjects,
+        tileIDs: tileIDs,
+        tiles: savingTiles,
+    });
+}
+
+function parseLevelData(levelData) {
+    levelWidth = levelData.width;
+    levelHeight = levelData.height;
+    levelDepth = levelData.depth;
+    let tileIDs = levelData.tileIDs;
+    let loadingTiles = levelData.tiles;
+    for (let z = 0; z < levelDepth; z++) {
+        for (let x = 0; x < levelWidth; x++) {
+            for (let y = 0; y < levelHeight; y++) {
+                let tileID = loadingTiles[z][x][y];
+                levelTiles[z][x][y] = tileIDs[tileID];
+            }
+        }
+    }
+    for (let i = 0; i < levelData.objects.length; i++) {
+        levelObjects = [player];
+        let object = new classes[levelData.objects[i].type];
+        Object.assign(object, levelData.objects[i].data);
+        levelObjects.push(object);
+    }
+}
+
+// File stuff
+// I barely know how this section works, it's cobbled together from documentation and AI suggestions
+
+async function getFileSaveHandle() {
+    const options = {
+        types: [
+            {
+                description: 'JSON Files',
+                accept: {
+                    'application/json': ['.json'],
+                },
+                suggestedName: 'level.json',
+                startIn: 'downloads',
+                excludeAcceptAllOption: true,
+            },
+        ],
+    }
+    return await window.showSaveFilePicker(options);
+}
+
+async function saveLevel() {
+    output("Attempting to save level");
+    try {
+        const fileHandle = await getFileSaveHandle();
+        const writableStream = await fileHandle.createWritable();
+        await writableStream.write(stringifyLevelData());
+        await writableStream.close();
+        output("Level saved successfully");
+    } catch (err) {
+        output("Error saving file: " + err);
+    }
+}
+
+async function getFileOpenHandle() {
+    const options = {
+        types: [
+            {
+                description: 'JSON Files',
+                accept: {
+                    'application/json': ['.json'],
+                },
+
+            },
+        ],
+    }
+    return await window.showOpenFilePicker(options);
+}
+
+async function openLevel() {
+    output("Attempting to open level");
+    try {
+        const fileHandle = await getFileOpenHandle();
+        const file = await fileHandle[0].getFile();
+        const contents = await file.text();
+        const levelData = JSON.parse(contents);
+        parseLevelData(levelData);
+        output("Level opened successfully");
+    } catch (err) {
+        output("Error opening file: " + err);
+    }
+}
+
+
 // Basic game logic
 
 function updateGame() {
@@ -634,6 +808,16 @@ function updateGame() {
             levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
         }
     }
+
+    if (shortcutsHit["s"]) {
+        saveLevel();
+    }
+    if (shortcutsHit["o"]) {
+        openLevel();
+    }
+
+    // if (keyHit["i"]) {}
+    // }
 }
 
 
