@@ -1,6 +1,5 @@
 Important:
 - Add menus (settings, level select)
-- Add level system (load from json files)
 - Add level editor
 - Add levels
 

@@ -31,6 +31,7 @@ loadAsset("amongus", "sussy.png");
 loadAsset("carrots", "Carrots.png");
 loadAsset("tile", "Closed.png");
 loadAsset("flag", "Flag_R.png");
+loadAsset("glungus", "Glungus.jpeg");
 
 
 let log = document.getElementById("log");
@@ -213,17 +214,19 @@ let levelWidth = 100;
 let levelHeight = 100;
 let levelDepth = 1;
 let levelTiles = tileGrid(levelDepth, levelWidth, levelHeight);
-for (let x = 0; x < levelWidth; x++) {
-    for (let y = 0; y < levelHeight; y++) {
-        if (Math.random() < 0.2) {
-            levelTiles[0][x][y] = {type: "dirt"};
-        }
-        if (Math.random() < 0.02) {
-            levelTiles[0][x][y] = {type: "flower"};
-        }
-    }
-}
+// for (let x = 0; x < levelWidth; x++) {
+//     for (let y = 0; y < levelHeight; y++) {
+//         if (Math.random() < 0.2) {
+//             levelTiles[0][x][y] = {type: "dirt"};
+//         }
+//         if (Math.random() < 0.02) {
+//             levelTiles[0][x][y] = {type: "flower"};
+//         }
+//     }
+// }
 
+
+let editMode = false;
 
 // Camera
 class cameraObject {
@@ -296,10 +299,14 @@ class cameraObject {
         
         if (userInput["toggleFreeCamMode"]) {
             this.freeMode = !this.freeMode;
-            if (!this.freeMode) {
+            if (this.freeMode) {
+                this.x = player.x;
+                this.y = player.y;
+            } else {
                 this.zoom = this.defaultZoom;
             }
             player.freeFlight = !player.freeFlight;
+            editMode = !editMode;
         }
     }
 }
@@ -443,11 +450,6 @@ class physicalObject extends dynamicObject {
             collisionY(this);
             collisionX(this);
         }
-        if (this.touchingHard.down || this.touchingHard.up) {
-            this.vx *= this.friction;
-        } else {
-            this.vx *= this.airResistance;
-        }
     }
 
     render() {
@@ -531,6 +533,12 @@ class playerObject extends physicalObject {
 
             super.update();
 
+            if (this.touchingHard.down || this.touchingHard.up) {
+                this.vx *= this.friction;
+            } else {
+                this.vx *= this.airResistance;
+            }
+
             if (this.touchingHard.up) {
                 this.jumpTime = 0;
             }
@@ -542,20 +550,25 @@ class playerObject extends physicalObject {
     }
 }
 
-class testObject extends dynamicObject {
+class testObject extends physicalObject {
     constructor() {
         super();
         this.width = 0.8;
         this.height = 0.8;
+        this.maxSpeed = 0.2;
+        this.randomFactor = 5;
     }
 
     update() {
+        this.vx += (player.x - this.x + this.randomFactor * (Math.random() - 0.5)) * 0.004;
+        this.vy += (player.y - this.y + this.randomFactor * (Math.random() - 0.5)) * 0.004;
+        this.vx = clamp(this.vx, -this.maxSpeed, this.maxSpeed);
+        this.vy = clamp(this.vy, -this.maxSpeed, this.maxSpeed);
         super.update();
-        this.x += 0.01;
     }
 
     render() {
-        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["amongus"]);
+        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["glungus"]);
     }
 }
 
@@ -800,24 +813,29 @@ function updateGame() {
     mouseWorldPos = transformToWorldSpace(mouseX, mouseY);
     mouseGridPos.x = Math.round(mouseWorldPos.x);
     mouseGridPos.y = Math.round(mouseWorldPos.y);
-    if (mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
-        if (primaryMouseDown) {
-            levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
+    if (keyPressed["i"]) {
+        let glungu = new testObject();
+        glungu.x = player.x;
+        glungu.y = player.y;
+        levelObjects.push(glungu);
+    }
+    if (editMode) {
+        if (mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
+            if (primaryMouseDown) {
+                levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
+            }
+            if (secondaryMouseDown) {
+                levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
+            }
         }
-        if (secondaryMouseDown) {
-            levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
+
+        if (shortcutsHit["s"]) {
+            saveLevel();
+        }
+        if (shortcutsHit["o"]) {
+            openLevel();
         }
     }
-
-    if (shortcutsHit["s"]) {
-        saveLevel();
-    }
-    if (shortcutsHit["o"]) {
-        openLevel();
-    }
-
-    // if (keyHit["i"]) {}
-    // }
 }
 
 
