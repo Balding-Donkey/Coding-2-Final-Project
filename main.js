@@ -16,6 +16,9 @@ function logBase(base, x) {
 function clamp(x, min, max) {
     return Math.min(Math.max(x, min), max);
 }
+function mod(x, y) {
+    return ((x % y) + y) % y;
+}
 
 
 // Import assets
@@ -32,6 +35,21 @@ loadAsset("carrots", "Carrots.png");
 loadAsset("tile", "Closed.png");
 loadAsset("flag", "Flag_R.png");
 loadAsset("glungus", "Glungus.jpeg");
+
+// Import levels
+let levels = {};
+async function loadLevel(name, path) {
+    try {
+        const response = await fetch("levels/" + path);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        levels[name] = data;
+    } catch (err) {
+        output("Error loading level " + name + ": " + err);
+    }
+}
+// Load built-in levels
+loadLevel("test", "TestLevel.json");
 
 
 let log = document.getElementById("log");
@@ -84,12 +102,16 @@ let mouseWorldPos = {x: 0, y: 0}; // The position of the mouse, relative to inga
 let mouseGridPos = {x: 0, y: 0}; // The position of the mouse rounded to the grid
 let mouseX = 0; // The screenspace X position of the mouse
 let mouseY = 0; // The screenspace Y position of the mouse
+let previousMousePos = {x: 0, y: 0};
+let mouseMovement = {x: 0, y: 0};
 
 canvas.addEventListener("mousemove", (event) => {
     let rect = canvas.getBoundingClientRect();
     mouseX = event.clientX - rect.left - canvasWidth / 2;
     mouseY = event.clientY - rect.top - canvasHeight / 2;
-    // mouseWorldPos = transformToWorldSpace(mouseX, mouseY); // Do this in the game loop instead so that it happens when the camera is moved too
+    mouseMovement = {x: mouseX - previousMousePos.x, y: mouseY - previousMousePos.y};
+    previousMousePos = {x: mouseX, y: mouseY};
+    // mouseWorldPos = transformToWorldSpace(mouseX, mouseY); // Do this in the game loop instead so that it happens when the camera moves too
 });
 
 let primaryMouseDown = false; // Whether the user is currently holding the primary mouse button
@@ -121,7 +143,7 @@ document.addEventListener("mouseup", (event) => {
 });
 
 // Gamepad input
-const GAMEPAD_DEADZONE = 0.2; // The minimum value for gamepad axes to be registered, prevents drift
+const GAMEPAD_DEADZONE = 0.3; // The minimum value for gamepad axes to be registered, prevents drift
 let gamepadDown = {}; // A map of gamepad buttons that are currently held down
 let gamepadHit = {}; // A map of gamepad buttons which have been pressed this frame
 let gamepadAxes = {};
@@ -138,14 +160,31 @@ function updateGamepadInput() {
             gamepadAxes[i] = Math.abs(gamepad.axes[i]) > GAMEPAD_DEADZONE ? gamepad.axes[i] : 0;
         }
     }
+    if (gamepadAxes[0] < 0 && !gamepadDown["left"]) {
+        gamepadHit["left"] = true;
+    }
+    if (gamepadAxes[0] > 0 && !gamepadDown["right"]) {
+        gamepadHit["right"] = true;
+    }
+    if (gamepadAxes[1] < 0 && !gamepadDown["up"]) {
+        gamepadHit["up"] = true;
+    }
+    if (gamepadAxes[1] > 0 && !gamepadDown["down"]) {
+        gamepadHit["down"] = true;
+    }
+    gamepadDown["left"] = gamepadAxes[0] < 0;
+    gamepadDown["right"] = gamepadAxes[0] > 0;
+    gamepadDown["up"] = gamepadAxes[1] < 0;
+    gamepadDown["down"] = gamepadAxes[1] > 0;
 }
-        
-    
+
+
 
 // Reset keys hit and mouse clicked each frame
 function resetInput() {
     primaryMouseClicked = false;
     secondaryMouseClicked = false;
+    mouseMovement = {x: 0, y: 0};
     for (let key in keyPressed) {
         keyPressed[key] = false;
     }
@@ -160,37 +199,320 @@ function resetInput() {
     }
 }
 
-let userInput = {
-    "moveUp": false,
-    "moveDown": false,
-    "moveLeft": false,
-    "moveRight": false,
-    "jump": false,
-    "zoomIn": false,
-    "zoomOut": false,
-    "toggleFreeCamMode": false,
-};
-function updateBindableInputs() {
-    // Handles inputs with multiple or changeable binds
-    // Binds being set by variables will be added later
-    updateGamepadInput();
-    userInput["moveUp"] = ((keyDown["w"] ?? false) || (keyDown["ArrowUp"] ?? false) || (gamepadAxes[1] ?? 0) < 0 || (gamepadDown[12] ?? false));
-    userInput["moveDown"] = ((keyDown["s"] ?? false) || (keyDown["ArrowDown"] ?? false) || (gamepadAxes[1] ?? 0) > 0);
-    userInput["moveLeft"] = ((keyDown["a"] ?? false) || (keyDown["ArrowLeft"] ?? false) || (gamepadAxes[0] ?? 0) < 0);
-    userInput["moveRight"] = ((keyDown["d"] ?? false) || (keyDown["ArrowRight"] ?? false) || (gamepadAxes[0] ?? 0) > 0);
-    userInput["jumpStart"] = ((keyHit[" "] ?? false) || (gamepadHit[0] ?? false));
-    userInput["jumpHold"] = ((keyDown[" "] ?? false) || (gamepadDown[0] ?? false));
-    userInput["zoomIn"] = ((keyDown["e"] ?? false) || (gamepadDown[7] ?? false));
-    userInput["zoomOut"] = ((keyDown["q"] ?? false) || (gamepadDown[6] ?? false));
-    userInput["toggleFreeCamMode"] = ((keyHit["z"] ?? false) || (gamepadHit[3] ?? false));
+let userInput = {};
 
+class UserInputAction {
+    constructor(name, type, defaults, gamepadDefaults = []) {
+        this.name = name;
+        this.keys = defaults;
+        this.buttons = gamepadDefaults;
+        this.type = type;
+    }
+
+    getState() {
+        let state = false;
+        let keyboardInputs = [];
+        let gamepadInputs = [];
+        switch (this.type) {
+            case "down":
+                keyboardInputs = keyDown;
+                gamepadInputs = gamepadDown;
+                break;
+            case "hit":
+                keyboardInputs = keyHit;
+                gamepadInputs = gamepadHit;
+                break;
+            case "pressed":
+                keyboardInputs = keyPressed;
+                gamepadInputs = gamepadHit; // Gamepad does not support pressed
+                break;
+            case "modifier":
+                keyboardInputs = shortcutsHit;
+                gamepadInputs = gamepadHit; // Gamepad does not have modifier keys
+                break;
+        }
+        this.keys.forEach((input) => {
+            state = state || (keyboardInputs[input] ?? false);
+        });
+        this.buttons.forEach((input) => {
+            state = state || (gamepadInputs[input] ?? false);
+        });
+        return state;
+    }
 }
 
+userInputActions = [
+    new UserInputAction("menuUp", "pressed", ["w", "ArrowUp"], [12, "up"]),
+    new UserInputAction("menuDown", "pressed", ["s", "ArrowDown"], [13, "down"]),
+    new UserInputAction("menuLeft", "pressed", ["a", "ArrowLeft"], [14, "left"]),
+    new UserInputAction("menuRight", "pressed", ["d", "ArrowRight"], [15, "right"]),
+    new UserInputAction("menuSelect", "hit", [" ", "Enter"], [0]),
+    new UserInputAction("menuReset", "hit", ["r"], [2]),
+    new UserInputAction("menuBack", "hit", ["Escape"], [1]),
+    new UserInputAction("pause", "hit", ["Escape"], [8, 9]),
+    new UserInputAction("moveUp", "down", ["w", "ArrowUp"], [12, "up"]),
+    new UserInputAction("moveDown", "down", ["s", "ArrowDown"], [13, "down"]),
+    new UserInputAction("moveLeft", "down", ["a", "ArrowLeft"], [14, "left"]),
+    new UserInputAction("moveRight", "down", ["d", "ArrowRight"], [15, "right"]),
+    new UserInputAction("jumpStart", "hit", [" "], [0]),
+    new UserInputAction("jumpHold", "down", [" "], [0]),
+    new UserInputAction("zoomIn", "down", ["e"], [7]),
+    new UserInputAction("zoomOut", "down", ["q"], [6]),
+    new UserInputAction("toggleEditMode", "hit", ["z"], [3]),
+    new UserInputAction("saveLevel", "modifier", ["s"]),
+    new UserInputAction("loadLevel", "modifier", ["o"]),
+    new UserInputAction("spawnGlungus", "pressed", ["i"]),
+];
+
+// Set up each input as false initially
+for (let i = 0; i < userInputActions.length; i++) {
+    let action = userInputActions[i];
+    userInput[action.name] = false;
+}
+
+function updateBindableInputs() {
+    // Handles keyboard and gamepad inputs
+
+    updateGamepadInput();
+    for (let i = 0; i < userInputActions.length; i++) {
+        let action = userInputActions[i];
+        userInput[action.name] = action.getState();
+    }
+}
+
+
+// User Interface
+
+let menus = {};
+let gameState = "title"; // What menu to display
+
+class MenuOption {
+    // A selectable option listed in a menu
+    constructor(text) {
+        this.text = text;
+    }
+
+    getText() {
+        return this.text;
+    }
+
+    // By default, activating a menu option will set the game state to a set value, but it can be overridden with other code.
+    activate(type = 0) {
+        return;
+    }
+
+    reset() {
+        return;
+    }
+}
+
+class MenuOptionChangeState extends MenuOption {
+    // A menu option that changes the game state
+    constructor(text, state=null) {
+        super(text);
+        this.state = state;
+    }
+
+    activate(type = 0) {
+        if (!(this.state === null) && type == 0) {
+            gameState = this.state ?? gameState;
+        }
+        return;
+    }
+}
+
+class MenuOptionLinear extends MenuOption {
+    // A menu option that has a number value which can be changed
+    constructor(text, defaultValue = 0, min = 0, max = 10, step = 1) {
+        super(text);
+        this.default = defaultValue;
+        this.value = defaultValue;
+        this.min = min;
+        this.max = max;
+        this.step = step;
+    }
+
+    getText() {
+        return this.text + ": " + this.value;
+    }
+
+    activate(type = 0) {
+        if (type !== 0) {
+            this.value = clamp(this.value + type * this.step, this.min, this.max);
+        }
+    }
+
+    reset() {
+        this.value = this.default;
+    }
+}
+
+class MenuOptionBoolean extends MenuOption {
+    // A menu option that has a boolean value which can be toggled
+    constructor(text, defaultValue=false, trueText = "On", falseText = "Off") {
+        super(text);
+        this.default = defaultValue;
+        this.value = defaultValue;
+        this.trueText = trueText;
+        this.falseText = falseText;
+    }
+
+    getText() {
+        return this.text + ": " + (this.value ? this.trueText : this.falseText);
+    }
+
+    activate(type = 0) {
+        this.value = !this.value;
+    }
+
+    reset() {
+        this.value = this.default;
+    }
+}
+
+class MenuOptionLevel extends MenuOption {
+    // A menu option that loads a level when selected
+    constructor(text, levelPath) {
+        super(text);
+        this.level = levelPath;
+    }
+
+    activate(type = 0) {
+        if (type == 0) {
+            openBuiltInLevel(this.level);
+        }
+    }
+}
+
+class Menu {
+    // A list of selectable options that appear in a list
+    constructor(options = []) {
+        this.selectedOption = 0;
+        this.options = options;
+        this.back = "play";
+        this.selectColor = "yellow";
+        this.unselectedColor = "white";
+        this.font = "20px Arial";
+        this.background = "rgba(0, 0, 0, 0.3)";
+        this.yOffset = 50;
+    }
+
+    render() {
+        ctx.fillStyle = this.background;
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        for (let i = 0; i < this.options.length; i++) {
+            let option = this.options[i];
+            let text = option.getText();
+            if (i === this.selectedOption) {
+                text = "> " + text + " <";
+                ctx.fillStyle = this.selectColor;
+            } else {
+                ctx.fillStyle = this.unselectedColor;
+            }
+            // const metrics = ctx.measureText(text)
+            ctx.textAlign = "center";
+            ctx.font = this.font
+            ctx.fillText(text, canvasWidth / 2, this.yOffset + i * 30);
+        }
+    }
+}
+
+// Ran inside a function for organization and memory purposes
+function setupMenus() {
+
+    // Special Buttons
+    let resetButton = new MenuOption("Reset all to default");
+    resetButton.activate = function(type = 0) {
+        if (type == 0) {
+            // Activate reset for all options on the current menu
+            menus[gameState].options.forEach((option) => {
+                option.reset();
+            });
+        }
+    }
+
+    let backButton = new MenuOption("Back");
+    backButton.activate = function(type = 0) {
+        if (type == 0) {
+            // Activate the current menu's back function
+            gameState = menus[gameState].back;
+        }
+    }
+
+    let loadButton = new MenuOption("Custom level")
+    loadButton.activate = function(type = 0) {
+        if (type == 0) {
+            openLevel();
+        }
+    }
+
+    // Pause
+    let options = [
+        new MenuOptionChangeState("Resume", "play"),
+        new MenuOptionChangeState("Settings", "settings2"),
+        new MenuOptionChangeState("Exit level", "selectLevel"),
+    ];
+    menus.pause = new Menu(options);
+
+    // Settings
+    options = [
+        backButton,
+        new MenuOptionLinear("Placeholder setting 1"),
+        new MenuOptionBoolean("Placeholder setting 2"),
+        new MenuOptionLinear("Placeholder setting 3", 0, -Infinity, Infinity, 100),
+        // new MenuOptionChangeState("Keyboard Controls", "settingsKeyboard"),
+        // new MenuOptionChangeState("Gamepad Controls", "settingsGamepad"),
+        resetButton,
+    ];
+    menus.settings = new Menu(options);
+    menus.settings.back = "title";
+
+    // Settings 2
+    menus.settings2 = new Menu(options);
+    menus.settings2.back = "pause";
+
+    // Ingame
+    menus.play = new Menu([]);
+    menus.play.back = "pause";
+    menus.play.background = "rgba(0, 0, 0, 0)";
+
+    // Title
+    options = [
+        new MenuOptionChangeState("Play", "selectLevel"),
+        new MenuOptionChangeState("Create", "play"),
+        loadButton,
+        new MenuOptionChangeState("Settings", "settings"),
+    ];
+    menus.title = new Menu(options)
+    menus.title.background = "rgb(35, 234, 28)";
+    menus.title.back = "title";
+    menus.title.yOffset = 250;
+
+    // Level Select
+    options = [
+        backButton,
+        new MenuOptionLevel("Test - Cages", "placeholder/TestLevel"),
+        new MenuOptionLevel("Test - Village", "placeholder/Sewers"),
+    ];
+    menus.selectLevel = new Menu(options);
+    menus.selectLevel.selectedOption = 1;
+    menus.selectLevel.back = "title";
+
+    // Loading Screen
+    options = [
+        new MenuOption("Loading...")
+    ];
+    menus.loading = new Menu(options);
+    menus.loading.back = "loading";
+    menus.loading.background = "rgb(150, 126, 255)"
+
+}
+setupMenus()
 
 
 // Tiles
 
-class tile {
+class Tile {
     constructor(sprite = null, collidable = false) {
         this.collidable = collidable;
         this.sprite = sprite;
@@ -204,32 +526,32 @@ function tileGrid(depth, width, height, defaultTile = DEFAULT_TILE) {
 }
 
 let tileTypes = {
-    "air": new tile(null, false),
-    "grass": new tile(assets["tile"], true),
-    "dirt": new tile(assets["flag"], true),
-    "flower": new tile(assets["carrots"], false),
+    "air": new Tile(null, false),
+    "grass": new Tile(assets.tile, true),
+    "dirt": new Tile(assets.flag, true),
+    "flower": new Tile(assets.carrots, false),
 }
 
 let levelWidth = 100;
 let levelHeight = 100;
-let levelDepth = 1;
+let levelDepth = 1; // The amount of layers, only layer 0 will be used for collision
 let levelTiles = tileGrid(levelDepth, levelWidth, levelHeight);
 // for (let x = 0; x < levelWidth; x++) {
 //     for (let y = 0; y < levelHeight; y++) {
-//         if (Math.random() < 0.2) {
+//         if (Math.random() < 0.02) {
 //             levelTiles[0][x][y] = {type: "dirt"};
 //         }
-//         if (Math.random() < 0.02) {
+//         if (Math.random() < 0.002) {
 //             levelTiles[0][x][y] = {type: "flower"};
 //         }
 //     }
 // }
 
 
-let editMode = false;
+let editMode = false; // Whether the user can edit the level
 
 // Camera
-class cameraObject {
+class CameraObject {
     /*
     Camera system explained:
     The camera has a "target position" which it always moves towards.
@@ -257,14 +579,13 @@ class cameraObject {
         this.y = levelHeight / 2;
         this.zoom = this.defaultZoom;
         this.panSpeed = 0;
-        this.freeMode = false;
         this.xOffset = 0; // How far the camera is offset from the player horizontally
         this.yOffset = 0; // How far the camera is offset from the player vertically
         this.quickFallingTime = 0; // How long the player has been falling at max speed for (might be moved to the player object in the future)
     }
 
     position() {
-        if (this.freeMode) {
+        if (editMode) {
             this.panSpeed = 0.2 * Math.sqrt(this.defaultZoom / this.zoom);
             this.y += this.panSpeed * (userInput["moveDown"] - userInput["moveUp"]);
             this.x += this.panSpeed * (userInput["moveRight"] - userInput["moveLeft"]);
@@ -296,28 +617,16 @@ class cameraObject {
             this.x += (targetX - this.x) * this.lerp;
             this.y += (targetY - this.y) * this.lerp;
         }
-        
-        if (userInput["toggleFreeCamMode"]) {
-            this.freeMode = !this.freeMode;
-            if (this.freeMode) {
-                this.x = player.x;
-                this.y = player.y;
-            } else {
-                this.zoom = this.defaultZoom;
-            }
-            player.freeFlight = !player.freeFlight;
-            editMode = !editMode;
-        }
     }
 }
-let camera = new cameraObject();
+let camera = new CameraObject();
 
 
 // Objects
 
-class dynamicObject {
+class DynamicObject {
     // Base class for objects that can move, does not include physics
-    constructor() {
+    constructor(active = false) {
         // Constants
         this.width = 1;
         this.height = 1;
@@ -332,6 +641,10 @@ class dynamicObject {
     }
 
     render() {
+        return
+    }
+
+    activate() {
         return
     }
 }
@@ -419,10 +732,10 @@ function collisionY(object) {
     }
 }
 
-class physicalObject extends dynamicObject {
+class PhysicalObject extends DynamicObject {
     // Base class for objects that collide with walls and experience gravity
-    constructor() {
-        super();
+    constructor(active = false) {
+        super(active);
         // Constants
         this.gravityY = 0.025;
         this.friction = 0.7;
@@ -457,10 +770,10 @@ class physicalObject extends dynamicObject {
     }
 }
 
-class playerObject extends physicalObject {
+class PlayerObject extends PhysicalObject {
     // Player object controlled by the user
-    constructor() {
-        super();
+    constructor(active = false) {
+        super(active);
         // Constant Overrides
         this.width = 0.8;
         this.height = 1.5;
@@ -471,7 +784,7 @@ class playerObject extends physicalObject {
         this.fallSpeed = 0.5;
 
         // Variables
-        this.freeFlight = false;
+        // (none)
 
         // Constants (Jumping)
         this.jumpGravity = 0.01; // The gravity used during a jump
@@ -496,7 +809,7 @@ class playerObject extends physicalObject {
         } else {
             this.jumpBuffer -= 1;
         }
-        if (this.freeFlight) {
+        if (editMode) {
             this.x = camera.x;
             this.y = camera.y;
         } else {
@@ -546,13 +859,14 @@ class playerObject extends physicalObject {
     }
 
     render() {
-        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["tiller"]);
+        drawInWorldSpace(this.x, this.y, this.width, this.height, assets.tiller);
     }
 }
 
-class testObject extends physicalObject {
-    constructor() {
-        super();
+class TestObject extends PhysicalObject {
+    // Thing that flies towards you
+    constructor(active = false) {
+        super(active);
         this.width = 0.8;
         this.height = 0.8;
         this.maxSpeed = 0.2;
@@ -568,22 +882,24 @@ class testObject extends physicalObject {
     }
 
     render() {
-        drawInWorldSpace(this.x, this.y, this.width, this.height, assets["glungus"]);
+        drawInWorldSpace(this.x, this.y, this.width, this.height, assets.glungus);
     }
 }
 
 
+// A list of classes that can exist in the level
 const classes = {
-    dynamicObject: dynamicObject,
-    physicalObject: physicalObject,
-    playerObject: playerObject,
-    cameraObject: cameraObject,
-    tile: tile,
-    testObject: testObject,
+    DynamicObject: DynamicObject,
+    PhysicalObject: PhysicalObject,
+    PlayerObject: PlayerObject,
+    TestObject: TestObject,
 };
-// Required objects
-let player = new playerObject();
-let levelObjects = [player, new testObject(),];
+
+// Object system
+let player = new PlayerObject();
+let activeObjects = [];
+let constantObjects = [player];
+let inactiveObjects = [];
 
 
 // Rendering
@@ -637,38 +953,47 @@ function renderFrame() {
     // Clear the canvas for the new frame
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    // Draw the tiles
-    for (let x = 0; x < levelWidth; x++) {
-        for (let y = 0; y < levelHeight; y++) {
-            let tileType = levelTiles[0][x][y].type;
-            let tileSprite = tileTypes[tileType].sprite;
-            if (tileSprite === null) {
-                continue
+    if (gameState !== "selectLevel" && gameState !== "title") {
+        // Draw the tiles
+        for (let z = 0; z < levelDepth; z++) {    
+            for (let x = 0; x < levelWidth; x++) {
+                for (let y = 0; y < levelHeight; y++) {
+                    let tileType = levelTiles[z][x][y].type;
+                    let tileSprite = tileTypes[tileType].sprite;
+                    if (tileSprite === null) {
+                        continue
+                    }
+                    drawInWorldSpace(x, y, 1, 1, tileSprite);
+                }
             }
-            drawInWorldSpace(x, y, 1, 1, tileSprite);
+        }
+
+        // Draw the objects, including the player
+        renderingObjects = activeObjects.concat(constantObjects, (editMode ? inactiveObjects : []));
+        for (let i = 0; i < renderingObjects.length; i++) {
+            renderingObjects[i].render();
         }
     }
 
-    for (let i = 0; i < levelObjects.length; i++) {
-        levelObjects[i].render();
+    const currentMenu = menus[gameState];
+    // Render the current menu if it exists
+    if (currentMenu) {
+        currentMenu.render();
     }
 
-    // Render all pressed keys as text, debug
-    // let x = 0;
-    // ctx.font = "20px Arial";
-    // for (let key in keyDown) {
-    //     if (keyDown[key]) {
-    //         ctx.fillText(key, x, canvasHeight / 2);
-    //         x += 30;
-    //     }
-    // }
-    ctx.fillText(JSON.stringify(gamepadHit), 0, 100) // Debug
+    // debug stuff (will probably be removed eventually)
+    ctx.textAlign = "left";
+    ctx.font = "20px Arial";
+    ctx.fillStyle = "black";
+    // ctx.fillText(mouseMovement.x, 100, 100);
+    // ctx.fillText(mouseMovement.y, 100, 120);
 }
 
 
-// For loading/saving levels, these 2 functions are my own code
+// For loading/saving levels
 
 function stringifyLevelData() {
+    // Returns a string which describes the current level
     let tileIDsStrings = {};
     let tileIDs = {};
     let reverseTileIDs = {};
@@ -696,9 +1021,9 @@ function stringifyLevelData() {
         }
     }
     let savingObjects = [];
-    for (let i = 0; i < levelObjects.length; i++) {
-        let object = levelObjects[i];
-        if (!(object instanceof playerObject)) {
+    for (let i = 0; i < inactiveObjects.length; i++) {
+        let object = inactiveObjects[i];
+        if (!(object instanceof PlayerObject)) { // Do not save the player since it will not be reset when a level is loaded
             savingObjects.push({
                 type: object.constructor.name,
                 data: object,
@@ -716,6 +1041,7 @@ function stringifyLevelData() {
 }
 
 function parseLevelData(levelData) {
+    // Loads a level based on a level data object
     levelWidth = levelData.width;
     levelHeight = levelData.height;
     levelDepth = levelData.depth;
@@ -729,11 +1055,13 @@ function parseLevelData(levelData) {
             }
         }
     }
+    // Load objects
+    activeObjects = [];
+    inactiveObjects = [];
     for (let i = 0; i < levelData.objects.length; i++) {
-        levelObjects = [player];
         let object = new classes[levelData.objects[i].type];
         Object.assign(object, levelData.objects[i].data);
-        levelObjects.push(object);
+        inactiveObjects.push(object);
     }
 }
 
@@ -786,54 +1114,132 @@ async function getFileOpenHandle() {
 }
 
 async function openLevel() {
-    output("Attempting to open level");
+    output("Attempting to open custom level");
+    let previousState = gameState;
+    gameState = "loading";
     try {
         const fileHandle = await getFileOpenHandle();
         const file = await fileHandle[0].getFile();
         const contents = await file.text();
         const levelData = JSON.parse(contents);
         parseLevelData(levelData);
+        gameState = "play"
+        enterPlayMode();
         output("Level opened successfully");
     } catch (err) {
         output("Error opening file: " + err);
+        gameState = previousState;
     }
+}
+
+async function openBuiltInLevel(fileName) {
+    output("Attempting to open level");
+    let previousState = gameState;
+    gameState = "loading";
+    try {
+        const file = await fetch("levels/" + fileName + ".json");
+        const levelData = await file.json();
+        parseLevelData(levelData);
+        gameState = "play";
+        enterPlayMode();
+        output("Level opened successfully");
+    } catch(err) {
+        output("Error opening level: " + err);
+        gameState = previousState;
+    }
+}
+
+
+// Editor
+function enterPlayMode() {
+    editMode = false;
+    // Create "Active" copies of all the inactive objects
+    inactiveObjects.forEach(object => {
+        let newObject = new classes[object.constructor.name](true);
+        Object.assign(newObject, object);
+        activeObjects.push(newObject);
+    });
+    // Reset camera zoom
+    camera.zoom = camera.defaultZoom;
+}
+
+function exitPlayMode() {
+    editMode = true;
+    // Delete all active objects
+    activeObjects = [];
+    // Move the camera to the player
+    camera.x = player.x;
+    camera.y = player.y;
 }
 
 
 // Basic game logic
 
 function updateGame() {
-    // Update objects
-    for (let i = 0; i < levelObjects.length; i++) {
-        levelObjects[i].update();
-    }
-
-    camera.position();
-
-    mouseWorldPos = transformToWorldSpace(mouseX, mouseY);
-    mouseGridPos.x = Math.round(mouseWorldPos.x);
-    mouseGridPos.y = Math.round(mouseWorldPos.y);
-    if (keyPressed["i"]) {
-        let glungu = new testObject();
-        glungu.x = player.x;
-        glungu.y = player.y;
-        levelObjects.push(glungu);
-    }
-    if (editMode) {
-        if (mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
-            if (primaryMouseDown) {
-                levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
-            }
-            if (secondaryMouseDown) {
-                levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
-            }
+    const currentMenu = menus[gameState];
+    if (gameState == "play") {
+        // Update objects
+        let updatingObjects = activeObjects.concat(constantObjects);
+        for (let i = 0; i < updatingObjects.length; i++) {
+            updatingObjects[i].update();
         }
 
-        if (shortcutsHit["s"]) {
-            saveLevel();
+        camera.position();
+
+        mouseWorldPos = transformToWorldSpace(mouseX, mouseY);
+        mouseGridPos.x = Math.round(mouseWorldPos.x);
+        mouseGridPos.y = Math.round(mouseWorldPos.y);
+        if (userInput["spawnGlungus"]) {
+            let glungu = new TestObject();
+            glungu.x = player.x;
+            glungu.y = player.y;
+            inactiveObjects.push(glungu);
         }
-        if (shortcutsHit["o"]) {
-            openLevel();
+
+        if (userInput["toggleEditMode"]) {
+            if (editMode) {
+                enterPlayMode();
+            } else {
+                exitPlayMode();
+            }
+            output(editMode);
+        }
+
+        if (editMode) {
+            if (mouseGridPos.x >= 0 && mouseGridPos.x < levelWidth && mouseGridPos.y >= 0 && mouseGridPos.y < levelHeight) {
+                if (primaryMouseDown) {
+                    levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "grass"};
+                }
+                if (secondaryMouseDown) {
+                    levelTiles[0][mouseGridPos.x][mouseGridPos.y] = {type: "air"};
+                }
+            }
+
+            if (userInput["saveLevel"]) {
+                saveLevel();
+            }
+            if (userInput["loadLevel"]) {
+                openLevel();
+            }
+        }
+    }
+
+    if (currentMenu) {
+        const menuLength = currentMenu.options.length;
+        currentMenu.selectedOption = mod(currentMenu.selectedOption + (userInput.menuDown - userInput.menuUp), menuLength);
+        const selectedOption = currentMenu.options[currentMenu.selectedOption];
+        if (selectedOption) {
+            if (userInput.menuSelect || userInput.menuLeft || userInput.menuRight) {
+                selectedOption.activate(userInput.menuRight - userInput.menuLeft);
+            } else if (userInput.menuReset) {
+                selectedOption.reset();
+            }
+        }
+        if (userInput.menuBack && currentMenu.back && gameState !== "play") {
+            gameState = currentMenu.back;
+        }
+        if ((gameState == "play" || gameState == "pause") && userInput.pause) {
+            gameState = currentMenu.back;
         }
     }
 }
