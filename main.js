@@ -1107,7 +1107,7 @@ function parseLevelData(levelData) {
 }
 
 // File stuff
-// I barely know how this section works, it's cobbled together from documentation and AI suggestions
+// I barely know how this section works, it's cobbled together from documentation
 
 async function getFileSaveHandle() {
     const options = {

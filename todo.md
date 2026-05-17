@@ -3,6 +3,7 @@ This is a list of changes I intend to make in the future, I use this to help pri
 - Add keybinds
 - Add functionality to the settings menu
 - Add new sprites
+- Figure out how audio works
 - Add sounds
 - Add music
 - Add backgrounds/foregrounds
