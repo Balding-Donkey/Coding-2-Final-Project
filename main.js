@@ -1,11 +1,14 @@
 // Error logging and output to get around the fact that I can't use the developer console on a school chromebook
 let textLog = document.getElementById("textLog");
-function output(string) {
+function output(string, consoleLog = true) {
     textLog.innerHTML = textLog.innerHTML + string + "<br>";
+    if (consoleLog) {
+        console.log("Game: " + string);
+    }
 }
 output("Script loaded successfully"); // If this does not appear then if means the script didn't run
 window.addEventListener("error", (event) => {
-    output("Error at " + event.filename + ":" + event.lineno + " - " + event.message);
+    output("Error at " + event.filename + ":" + event.lineno + " - " + event.message, consoleLog = false);
 });
 
 
@@ -29,29 +32,20 @@ function loadAsset(name, path) {
     assets[name] = image;
 }
 // Placeholder assets
-loadAsset("tiller", "partick tiler.png");
-loadAsset("amongus", "sussy.png");
-loadAsset("carrots", "Carrots.png");
-loadAsset("tile", "Closed.png");
-loadAsset("flag", "Flag_R.png");
-loadAsset("glungus", "Glungus.jpeg");
-
-// Import levels
-let levels = {};
-async function loadLevel(name, path) {
-    try {
-        const response = await fetch("levels/" + path);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        levels[name] = data;
-    } catch (err) {
-        output("Error loading level " + name + ": " + err);
-    }
-}
-// Load built-in levels
-loadLevel("test", "TestLevel.json");
+loadAsset("tiller", "placeholder/partick tiler.png");
+loadAsset("amongus", "placeholder/sussy.png");
+loadAsset("carrots", "placeholder/Carrots.png");
+loadAsset("tile", "placeholder/Closed.png");
+loadAsset("flag", "placeholder/Flag_R.png");
+loadAsset("glungus", "placeholder/Glungus.jpeg");
+// Objects
+loadAsset("ending", "objects/ending.png");
+// Tiles
+loadAsset("grass", "tiles/grass.png");
+loadAsset("concrete", "tiles/concrete.png");
 
 
+// Custom output log
 let log = document.getElementById("log");
 let logButton = document.getElementById("loggleToggle");
 // Allows you to hide and show the log
@@ -62,6 +56,7 @@ logButton.addEventListener("click", () => {
         log.style.display = "none";
     }
 });
+
 
 // Canvas setup
 let canvas = document.getElementById("canvas");
@@ -262,6 +257,9 @@ userInputActions = [
     new UserInputAction("saveLevel", "modifier", ["s"]),
     new UserInputAction("loadLevel", "modifier", ["o"]),
     new UserInputAction("spawnGlungus", "pressed", ["i"]),
+    new UserInputAction("placeEnding", "hit", ["l"]),
+    new UserInputAction("deleteEnding", "hit", ["k"]),
+    new UserInputAction("setLevelStart", "hit", ["j"]),
 ];
 
 // Set up each input as false initially
@@ -390,7 +388,7 @@ class Menu {
         this.selectedOption = 0;
         this.options = options;
         this.back = "play";
-        this.selectColor = "yellow";
+        this.selectColor = "#fff7b1";
         this.unselectedColor = "white";
         this.font = "20px Arial";
         this.background = "rgba(0, 0, 0, 0.3)";
@@ -484,17 +482,19 @@ function setupMenus() {
         new MenuOptionChangeState("Settings", "settings"),
     ];
     menus.title = new Menu(options)
-    menus.title.background = "rgb(35, 234, 28)";
+    menus.title.background = "#7edb4c";
     menus.title.back = "title";
     menus.title.yOffset = 250;
 
     // Level Select
     options = [
         backButton,
-        new MenuOptionLevel("Test - Cages", "placeholder/TestLevel"),
-        new MenuOptionLevel("Test - Village", "placeholder/Sewers"),
+        new MenuOptionLevel("House and Basement", "level1"),
+        new MenuOptionLevel("Diamond Tower", "level2"),
+        new MenuOptionLevel("The Challenge", "challenge")
     ];
     menus.selectLevel = new Menu(options);
+    menus.selectLevel.background = "#7edb4c";
     menus.selectLevel.selectedOption = 1;
     menus.selectLevel.back = "title";
 
@@ -505,6 +505,14 @@ function setupMenus() {
     menus.loading = new Menu(options);
     menus.loading.back = "loading";
     menus.loading.background = "rgb(150, 126, 255)"
+
+    // Win Screen
+    options = [
+        new MenuOption("You win!"),
+        new MenuOptionChangeState("Return to Level Select", "selectLevel"),
+    ]
+    menus.win = new Menu(options);
+    menus.win.back = "selectLevel";
 
 }
 setupMenus()
@@ -527,9 +535,8 @@ function tileGrid(depth, width, height, defaultTile = DEFAULT_TILE) {
 
 let tileTypes = {
     "air": new Tile(null, false),
-    "grass": new Tile(assets.tile, true),
-    "dirt": new Tile(assets.flag, true),
-    "flower": new Tile(assets.carrots, false),
+    "grass": new Tile(assets.grass, true),
+    "concrete": new Tile(assets.concrete, true),
 }
 
 let levelWidth = 100;
@@ -546,6 +553,7 @@ let levelTiles = tileGrid(levelDepth, levelWidth, levelHeight);
 //         }
 //     }
 // }
+let startPosition = {x: 0, y: 0};
 
 
 let editMode = false; // Whether the user can edit the level
@@ -886,6 +894,25 @@ class TestObject extends PhysicalObject {
     }
 }
 
+class LevelEnding extends DynamicObject {
+    constructor(active = false) {
+        super(active);
+        this.width = 0.5;
+        this.height = 0.5;
+    }
+
+    update() {
+        super.update();
+        if ((Math.abs(player.x - this.x) < (this.width + player.width) / 2) && (Math.abs(player.y - this.y) < (this.height + player.height) / 2)) {
+            gameState = "win";
+        }
+    }
+
+    render() {
+        drawInWorldSpace(this.x, this.y, this.width * 2, this.width * 2, assets.ending);
+    }
+}
+
 
 // A list of classes that can exist in the level
 const classes = {
@@ -893,6 +920,7 @@ const classes = {
     PhysicalObject: PhysicalObject,
     PlayerObject: PlayerObject,
     TestObject: TestObject,
+    LevelEnding: LevelEnding,
 };
 
 // Object system
@@ -1031,9 +1059,12 @@ function stringifyLevelData() {
         }
     }
     return JSON.stringify({
+        // Values
         width: levelWidth,
         height: levelHeight,
         depth: levelDepth,
+        start: startPosition,
+        // Data
         objects: savingObjects,
         tileIDs: tileIDs,
         tiles: savingTiles,
@@ -1042,9 +1073,18 @@ function stringifyLevelData() {
 
 function parseLevelData(levelData) {
     // Loads a level based on a level data object
+
+    // Variables
     levelWidth = levelData.width;
     levelHeight = levelData.height;
     levelDepth = levelData.depth;
+    startPosition = levelData.start;
+    player.x = startPosition.x;
+    player.y = startPosition.y;
+    camera.x = startPosition.x;
+    camera.y = startPosition.y;
+
+    // Tiles
     let tileIDs = levelData.tileIDs;
     let loadingTiles = levelData.tiles;
     for (let z = 0; z < levelDepth; z++) {
@@ -1055,7 +1095,8 @@ function parseLevelData(levelData) {
             }
         }
     }
-    // Load objects
+
+    // Objects
     activeObjects = [];
     inactiveObjects = [];
     for (let i = 0; i < levelData.objects.length; i++) {
@@ -1194,6 +1235,25 @@ function updateGame() {
             glungu.x = player.x;
             glungu.y = player.y;
             inactiveObjects.push(glungu);
+        }
+
+        if (userInput["placeEnding"]) {
+            let ending = new LevelEnding();
+            ending.x = Math.round(player.x);
+            ending.y = Math.round(player.y);
+            inactiveObjects.push(ending);
+        }
+        if (userInput["deleteEnding"]) {
+            for(let i = 0; i < inactiveObjects.length; i++) {
+                if (inactiveObjects[i] instanceof LevelEnding) {
+                    inactiveObjects.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+
+        if (userInput["setLevelStart"]) {
+            startPosition = {x: player.x, y: player.y};
         }
 
         if (userInput["toggleEditMode"]) {

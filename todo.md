@@ -1,13 +1,10 @@
-Important:
-- Add level editor
-- Add a way for levels to end
-- Add a starting point for the player
-- Add levels
-
-Less Important
+This is a list of changes I intend to make in the future, I use this to help prioritize tasks and lay out my vision.
+- Add level editor systems
 - Add keybinds
 - Add functionality to the settings menu
-- Add finalised assets
+- Add new sprites
+- Add sounds
+- Add music
 - Add backgrounds/foregrounds
 - Add camera controller objects (area, gradient, barrier, zoom, offset, etc.)
 - Add new gameplay mechanics (walljumping, hazards, etc.)
