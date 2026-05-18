@@ -1,5 +1,6 @@
 # Coding 2 Final Project
-[Click here to play the latest version](https://balding-donkey.github.io/Coding-2-Final-Project/)
+[Play the latest version](https://balding-donkey.github.io/Coding-2-Final-Project/)\
+[Video Walkthrough](VideoWalkthrough.mp4)
 ## Description
 This is a little platformer game I made from scratch.\
 There are three levels. In each level, your goal is to touch the yellow orb. There is no fail state.\
