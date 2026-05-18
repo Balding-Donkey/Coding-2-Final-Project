@@ -3,6 +3,7 @@ This is a list of changes I intend to make in the future, I use this to help pri
 - Add keybinds
 - Add functionality to the settings menu
 - Add new sprites
+- Add story?
 - Figure out how audio works
 - Add sounds
 - Add music
@@ -10,3 +11,4 @@ This is a list of changes I intend to make in the future, I use this to help pri
 - Add camera controller objects (area, gradient, barrier, zoom, offset, etc.)
 - Add new gameplay mechanics (walljumping, hazards, etc.)
 - Improve gamepad control (light joystick use and deadzone settings)
+- Fix built in level loading for downloaded copies
